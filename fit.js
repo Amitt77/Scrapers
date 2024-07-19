@@ -1,54 +1,119 @@
 const puppeteer = require('puppeteer');
 
-async function loginAndSearch() {
+async function loginAndSubmitBooking() {
     const username = 'gabriel.blanco@qualityct.com';
     const password = 'qct2017GB#01';
-    const bookingNumber = 'EBKG08415742';
 
-    const browser = await puppeteer.launch({ headless: false }); // Set headless: true to run without a browser UI
-    const page = await browser.newPage();
+    const containerNumbers = ['ABC9876543', 'XYZ1234567', 'MRSU6357389'];
+    const bookingNumbers = ['242285070', '242285069', '242285068'];
+
+    let browser;
 
     try {
+        // Launch browser and open a new page
+        browser = await puppeteer.launch({ headless: false }); // Set headless to false for debugging
+        const page = await browser.newPage();
+
         // Open website
-        await page.goto('https://forecast.fitpev.com/fc-FIT/default.do', { waitUntil: 'networkidle2' });
+        await page.goto('https://forecast.fitpev.com/fc-FIT/default.do');
 
         // Enter Email or username
-        await page.waitForXPath("//input[@id='j_username']");
-        await page.type("#j_username", username);
+        await page.type('#j_username', username);
 
         // Enter Password
-        await page.waitForXPath("//input[@id='j_password']");
-        await page.type("#j_password", password);
+        await page.type('#j_password', password);
 
         // Click on Log in
-        await page.waitForXPath("//button[@id='signIn']");
-        await page.click("#signIn");
+        await Promise.all([
+            page.waitForNavigation(), // Wait for navigation to complete
+            page.click('#signIn')
+        ]);
 
-        // Wait for navigation after login
-        await page.waitForNavigation({ waitUntil: 'networkidle2' });
+        // Wait for the page to load after login
+        await page.waitForSelector('a[href="/fc-FIT/import/default.do"]', { timeout: 10000 });
 
-        // Click on Booking
-        await page.waitForXPath("//body/div[3]/div[3]/ul[1]/li[5]/ul[1]/li[1]/a[1]");
-        await page.click("body > div.container.main-page > div.page-content > ul:nth-child(6) > li.dropdown.js-activated.disabled > ul > li:nth-child(1) > a");
+        for (let i = 0; i < containerNumbers.length; i++) {
+            const containerNumber = containerNumbers[i];
+            const bookingNumber = bookingNumbers[i];
 
-        // Enter Number
-        await page.waitForXPath("//input[@id='number']");
-        await page.type("#number", bookingNumber);
+            try {
+                await page.click('a[href="/fc-FIT/import/default.do"]');
 
-        // Click on Search
-        await page.waitForXPath("//button[@id='search']");
-        await page.click("#search");
+                await page.waitForSelector('#numbers', { timeout: 10000 });
 
-        // Wait for search results or perform further actions
-        await page.waitForNavigation({ waitUntil: 'networkidle2' });
+                await page.type('#numbers', containerNumber);
 
-        console.log('Search completed successfully.');
+                await Promise.all([
+                    page.waitForNavigation(), // Wait for navigation to complete
+                    page.click('#search')
+                ]);
+
+                await page.waitForSelector('#result', { timeout: 10000 });
+
+                const line = await page.$eval('#result > table > tbody > tr > td:nth-child(5) > div:nth-child(3) > strong', el => el.innerText)
+                    .catch(() => null);
+
+                if (!line) {
+                    console.log(`Unable to get information from port site.`);
+                    console.log({
+                        containerNumber,
+                        bookingNumber,
+                        sizeType: '',
+                        line: '',
+                        vesselVoyage: ''
+                    });
+                    continue;
+                }
+
+                await page.goto('https://forecast.fitpev.com/fc-FIT/export/default.do');
+
+                await page.waitForSelector('#number', { timeout: 10000 });
+
+                await page.type('#number', bookingNumber);
+
+                await page.select('#line', line);
+
+                await Promise.all([
+                    page.waitForNavigation(), // Wait for navigation to complete
+                    page.click('#search')
+                ]);
+
+                await page.waitForSelector('.south_20', { timeout: 10000 });
+
+                const tdContent = await page.evaluate((containerNumber, bookingNumber) => {
+                    const southDiv = document.querySelector('.south_20');
+                    const table = southDiv.querySelector('.table-condensed');
+                    const tbody = table.querySelector('tbody');
+                    if (tbody) {
+                        const trElement = tbody.querySelector('tr');
+                        if (trElement) {
+                            const sizeType = trElement.querySelector('td:nth-child(3)').innerHTML; // 3rd <td> (Size/Type)
+                            const line = trElement.querySelector('td:nth-child(6)').innerHTML; // 6th <td> (Line)
+                            const vesselVoyage = trElement.querySelector('td:nth-child(7)').innerHTML; // 7th <td> (Vessel/Voyage)
+                            return { containerNumber, bookingNumber, sizeType, line, vesselVoyage };
+                        }
+                    }
+                    return { containerNumber, bookingNumber, sizeType: '', line: '', vesselVoyage: '' };
+                }, containerNumber, bookingNumber);
+
+                console.log(`Successfully Scraped`, tdContent);
+
+            } catch (error) {
+                console.error(`Error processing container ${containerNumber} and booking ${bookingNumber}:`, error);
+            }
+        }
+
+        // Wait for 10 seconds (for demonstration purposes)
+        await new Promise(resolve => setTimeout(resolve, 10000));
 
     } catch (error) {
-        console.error('Error during login and search:', error);
+        console.error('Error during login:', error);
     } finally {
-        await browser.close();
+        // Close the browser
+        if (browser) {
+            await browser.close();
+        }
     }
 }
 
-loginAndSearch().catch(error => console.error('Error in main function:', error));
+loginAndSubmitBooking().catch(error => console.error('Error in main function:', error));
